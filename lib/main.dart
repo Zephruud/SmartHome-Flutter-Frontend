@@ -48,12 +48,12 @@ class _ShelfDashboardState extends State<ShelfDashboard> {
             color: Colors.purple.shade200,
             child: Column(
               children: [
-                SizedBox(height: 50),
-                Text(
+                const SizedBox(height: 50),
+                const Text(
                   'Shelf Manager',
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                 ),
-                SizedBox(height: 20),
+                const SizedBox(height: 20),
                 _buildSidebarButton(Icons.inventory, 'Inventory', 0),
                 _buildSidebarButton(Icons.warning, 'Alerts', 1),
                 _buildSidebarButton(Icons.bar_chart, 'Reports', 2),
@@ -71,14 +71,14 @@ class _ShelfDashboardState extends State<ShelfDashboard> {
     return GestureDetector(
       onTap: () => _onItemTapped(index),
       child: Padding(
-        padding: EdgeInsets.symmetric(vertical: 15, horizontal: 20),
+        padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
         child: Row(
           children: [
             Icon(icon, color: Colors.white, size: 28),
-            SizedBox(width: 15),
+            const SizedBox(width: 15),
             Text(
               label,
-              style: TextStyle(color: Colors.white, fontSize: 18),
+              style: const TextStyle(color: Colors.white, fontSize: 18),
             ),
           ],
         ),
@@ -87,7 +87,9 @@ class _ShelfDashboardState extends State<ShelfDashboard> {
   }
 }
 
-// Inventory Screen
+// ─────────────────────────────────────────────────────────────────────────────
+//                          📦 INVENTORY SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
 class InventoryScreen extends StatefulWidget {
   @override
   _InventoryScreenState createState() => _InventoryScreenState();
@@ -102,11 +104,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
     fetchInventoryItems();
   }
 
+  // Example GET to your local or remote API
   Future<void> fetchInventoryItems() async {
     final response = await http.get(Uri.parse('http://localhost:8080/api/inventory/items'));
 
     if (response.statusCode == 200) {
-      List<dynamic> jsonResponse = json.decode(response.body);
+      final jsonResponse = json.decode(response.body) as List<dynamic>;
       setState(() {
         items = jsonResponse.map((item) => Item.fromJson(item)).toList();
       });
@@ -115,87 +118,94 @@ class _InventoryScreenState extends State<InventoryScreen> {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  //                 SEND "EMPTY" OR "REFILL" TO THE M5STACK
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Called when item hits 0 → beep + red LED
+  Future<void> _notifyM5StackEmpty(String itemName) async {
+    final String m5stackIp = "192.168.0.175"; // Adjust to your M5 IP
+    final int m5stackPort = 8080;             // Adjust if needed
+    final String url = "http://$m5stackIp:$m5stackPort/notifyEmpty";
+
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"message": "$itemName is out of stock!"}),
+      );
+      if (response.statusCode == 200) {
+        print("Notification (EMPTY) sent to M5Stack.");
+      } else {
+        print("Failed to send empty notification. Status code: ${response.statusCode}");
+      }
+    } catch (e) {
+      print("Error sending empty notification: $e");
+    }
+  }
+
+  // Called when user refills item → stop beep, turn off LED
+  Future<void> _notifyM5StackRefill(String itemName) async {
+    final String m5stackIp = "192.168.0.175"; 
+    final int m5stackPort = 8080; 
+    final String url = "http://$m5stackIp:$m5stackPort/notifyRefill";
+
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"message": "$itemName is refilled!"}),
+      );
+      if (response.statusCode == 200) {
+        print("Notification (REFILL) sent to M5Stack.");
+      } else {
+        print("Failed to send refill notification. Status code: ${response.statusCode}");
+      }
+    } catch (e) {
+      print("Error sending refill notification: $e");
+    }
+  }
+
+  // Decrement item quantity
   void _removeItem(int index) {
     setState(() {
       if (items[index].quantity > 0) {
         items[index].quantity -= 1;
+
+        // If quantity just became 0, notify M5Stack to beep + red LED
+        if (items[index].quantity == 0) {
+          _notifyM5StackEmpty(items[index].name);
+        }
       }
     });
   }
 
-  void _addItem(String name, int quantity, double price) {
+  // Increment item quantity
+  void _addItem(int index) {
     setState(() {
-      items.add(Item(name: name, quantity: quantity, price: price));
+      final wasZeroBefore = (items[index].quantity == 0);
+      items[index].quantity += 1;
+
+      // If it was 0 before, we've "refilled" → notify M5Stack to stop beep
+      if (wasZeroBefore) {
+        _notifyM5StackRefill(items[index].name);
+      }
     });
-  }
-
-  void _showAddItemDialog() {
-    TextEditingController nameController = TextEditingController();
-    TextEditingController quantityController = TextEditingController();
-    TextEditingController priceController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text("Add New Item"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: InputDecoration(labelText: "Item Name"),
-              ),
-              TextField(
-                controller: quantityController,
-                decoration: InputDecoration(labelText: "Quantity"),
-                keyboardType: TextInputType.number,
-              ),
-              TextField(
-                controller: priceController,
-                decoration: InputDecoration(labelText: "Price per unit (€)"),
-                keyboardType: TextInputType.number,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (nameController.text.isNotEmpty &&
-                    quantityController.text.isNotEmpty &&
-                    priceController.text.isNotEmpty) {
-                  _addItem(
-                    nameController.text,
-                    int.tryParse(quantityController.text) ?? 0,
-                    double.tryParse(priceController.text) ?? 0.0,
-                  );
-                  Navigator.pop(context);
-                }
-              },
-              child: Text("Add"),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Handy to refresh from your API
       floatingActionButton: FloatingActionButton(
-        onPressed: _showAddItemDialog,
-        child: Icon(Icons.add),
+        onPressed: fetchInventoryItems,
+        child: const Icon(Icons.refresh),
         backgroundColor: Colors.purple,
       ),
       body: Padding(
-        padding: EdgeInsets.all(12.0),
+        padding: const EdgeInsets.all(12.0),
         child: GridView.builder(
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 3,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
@@ -214,24 +224,33 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   children: [
                     Text(
                       items[index].name,
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
-                    SizedBox(height: 5),
+                    const SizedBox(height: 5),
                     Text(
                       '€${items[index].price.toStringAsFixed(2)} per unit',
-                      style: TextStyle(color: Colors.green, fontSize: 14),
+                      style: const TextStyle(color: Colors.green, fontSize: 14),
                     ),
-                    SizedBox(height: 5),
+                    const SizedBox(height: 5),
                     Text(
                       'Qty: ${items[index].quantity}',
-                      style: TextStyle(color: Colors.black, fontSize: 14),
+                      style: const TextStyle(color: Colors.black, fontSize: 14),
                     ),
-                    if (items[index].quantity == 0)
-                      BlinkingText(),
-                    SizedBox(height: 6),
-                    IconButton(
-                      onPressed: () => _removeItem(index),
-                      icon: Icon(Icons.remove_circle_outline, color: Colors.purple, size: 24),
+                    if (items[index].quantity == 0) BlinkingText(),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(
+                          onPressed: () => _removeItem(index),
+                          icon: const Icon(Icons.remove_circle_outline, color: Colors.purple, size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        IconButton(
+                          onPressed: () => _addItem(index),
+                          icon: const Icon(Icons.add_circle_outline, color: Colors.purple, size: 24),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -244,7 +263,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 }
 
-// Blinking Refill Text
+// ─────────────────────────────────────────────────────────────────────────────
+//                         🔴 BLINKING "REFILL" ALERT
+// ─────────────────────────────────────────────────────────────────────────────
 class BlinkingText extends StatefulWidget {
   @override
   _BlinkingTextState createState() => _BlinkingTextState();
@@ -256,7 +277,7 @@ class _BlinkingTextState extends State<BlinkingText> with SingleTickerProviderSt
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(duration: Duration(milliseconds: 500), vsync: this)
+    _controller = AnimationController(duration: const Duration(milliseconds: 500), vsync: this)
       ..repeat(reverse: true);
   }
 
@@ -264,7 +285,7 @@ class _BlinkingTextState extends State<BlinkingText> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     return FadeTransition(
       opacity: _controller,
-      child: Text(
+      child: const Text(
         'REFILL',
         style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.red),
       ),
@@ -278,7 +299,9 @@ class _BlinkingTextState extends State<BlinkingText> with SingleTickerProviderSt
   }
 }
 
-// Item Model
+// ─────────────────────────────────────────────────────────────────────────────
+//                             📦 ITEM MODEL
+// ─────────────────────────────────────────────────────────────────────────────
 class Item {
   final String name;
   int quantity;
@@ -295,7 +318,20 @@ class Item {
   }
 }
 
-// Placeholder Screens
-class AlertScreen extends StatelessWidget { Widget build(BuildContext context) => Center(child: Text('Alerts Screen')); }
-class ReportsScreen extends StatelessWidget { Widget build(BuildContext context) => Center(child: Text('Reports Screen')); }
-class SettingsScreen extends StatelessWidget { Widget build(BuildContext context) => Center(child: Text('Settings Screen')); }
+// ─────────────────────────────────────────────────────────────────────────────
+//                       PLACEHOLDER SCREENS
+// ─────────────────────────────────────────────────────────────────────────────
+class AlertScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => const Center(child: Text('Alerts Screen'));
+}
+
+class ReportsScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => const Center(child: Text('Reports Screen'));
+}
+
+class SettingsScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => const Center(child: Text('Settings Screen'));
+}
