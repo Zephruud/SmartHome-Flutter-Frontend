@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_browser_client.dart';
 
 void main() {
   runApp(ShelfManagementApp());
@@ -24,6 +26,7 @@ class ShelfDashboard extends StatefulWidget {
 
 class _ShelfDashboardState extends State<ShelfDashboard> {
   int _selectedIndex = 0;
+  MQTTService? mqttService;
 
   void _onItemTapped(int index) {
     setState(() {
@@ -97,11 +100,18 @@ class InventoryScreen extends StatefulWidget {
 
 class _InventoryScreenState extends State<InventoryScreen> {
   List<Item> items = [];
+  MQTTService? mqttService;
 
   @override
   void initState() {
     super.initState();
+    _initializeMQTT();
     fetchInventoryItems();
+  }
+  Future<void> _initializeMQTT() async {
+    mqttService = await MQTTService.create();
+    await mqttService!.connect();
+    setState(() {});
   }
 
   // Example GET to your local or remote API
@@ -124,7 +134,15 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
   // Called when item hits 0 → beep + red LED
   Future<void> _notifyM5StackEmpty(String itemName) async {
-    final String m5stackIp = "192.168.0.175"; // Adjust to your M5 IP
+    if (mqttService != null && mqttService!.client.connectionStatus?.state == MqttConnectionState.connected) {
+      //mqttService!.publish('inventory/$itemName', '$itemName is empty!!');
+      mqttService!.publish('inventory/low', '$itemName is empty');
+    } else {
+      await mqttService!.connect();
+      //mqttService!.publish('inventory/$itemName', '$itemName is empty!!');
+      mqttService!.publish('inventory/low', '$itemName is empty');
+    }
+    /*final String m5stackIp = "192.168.0.175"; // Adjust to your M5 IP
     final int m5stackPort = 8080;             // Adjust if needed
     final String url = "http://$m5stackIp:$m5stackPort/notifyEmpty";
 
@@ -141,12 +159,19 @@ class _InventoryScreenState extends State<InventoryScreen> {
       }
     } catch (e) {
       print("Error sending empty notification: $e");
-    }
+    }*/
   }
 
   // Called when user refills item → stop beep, turn off LED
   Future<void> _notifyM5StackRefill(String itemName) async {
-    final String m5stackIp = "192.168.0.175"; 
+    if (mqttService != null && mqttService!.client.connectionStatus?.state == MqttConnectionState.connected) {
+      mqttService!.publish('inventory/$itemName', '$itemName has been refilled!!');
+    } else {
+      await mqttService!.connect();
+      mqttService!.publish('inventory/$itemName', '$itemName has been refilled');
+    }
+    /*
+    final String m5stackIp = "192.168.0.175";
     final int m5stackPort = 8080; 
     final String url = "http://$m5stackIp:$m5stackPort/notifyRefill";
 
@@ -163,7 +188,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
       }
     } catch (e) {
       print("Error sending refill notification: $e");
-    }
+    }*/
   }
 
   // Decrement item quantity
@@ -195,71 +220,165 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // Handy to refresh from your API
-      floatingActionButton: FloatingActionButton(
-        onPressed: fetchInventoryItems,
-        child: const Icon(Icons.refresh),
-        backgroundColor: Colors.purple,
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: GridView.builder(
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1.6,
-          ),
-          itemCount: items.length,
-          itemBuilder: (context, index) {
-            return Card(
-              color: Colors.white,
-              elevation: 3,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      items[index].name,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      '€${items[index].price.toStringAsFixed(2)} per unit',
-                      style: const TextStyle(color: Colors.green, fontSize: 14),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      'Qty: ${items[index].quantity}',
-                      style: const TextStyle(color: Colors.black, fontSize: 14),
-                    ),
-                    if (items[index].quantity == 0) BlinkingText(),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          onPressed: () => _removeItem(index),
-                          icon: const Icon(Icons.remove_circle_outline, color: Colors.purple, size: 24),
-                        ),
-                        const SizedBox(width: 12),
-                        IconButton(
-                          onPressed: () => _addItem(index),
-                          icon: const Icon(Icons.add_circle_outline, color: Colors.purple, size: 24),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
+  if (mqttService == null) {
+      return Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    } else {
+      return Scaffold(
+        // Handy to refresh from your API
+        floatingActionButton: FloatingActionButton(
+          onPressed: fetchInventoryItems,
+          child: const Icon(Icons.refresh),
+          backgroundColor: Colors.purple,
         ),
-      ),
-    );
+        body: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: GridView.builder(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 1.6,
+            ),
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              return Card(
+                color: Colors.white,
+                elevation: 3,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12.0)),
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        items[index].name,
+                        style: const TextStyle(fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        '€${items[index].price.toStringAsFixed(2)} per unit',
+                        style: const TextStyle(color: Colors.green,
+                            fontSize: 14),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        'Qty: ${items[index].quantity}',
+                        style: const TextStyle(color: Colors.black,
+                            fontSize: 14),
+                      ),
+                      if (items[index].quantity == 0) BlinkingText(),
+                      const SizedBox(height: 6),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          IconButton(
+                            onPressed: () => _removeItem(index),
+                            icon: const Icon(Icons.remove_circle_outline,
+                                color: Colors.purple, size: 24),
+                          ),
+                          const SizedBox(width: 12),
+                          IconButton(
+                            onPressed: () => _addItem(index),
+                            icon: const Icon(
+                                Icons.add_circle_outline, color: Colors.purple,
+                                size: 24),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//                         💻MQTT-Service
+//  Gets the relevant IP dynamically - this requires the backend and frontend to
+//  run on the same machine. Future-proofed by using the REST-call, assuming the
+//  backend and broker will always run on the same machine.
+// ─────────────────────────────────────────────────────────────────────────────
+class MQTTService {
+  late String broker;
+  late String clientIdentifier;
+  late MqttBrowserClient client;
+
+  MQTTService._internal(this.broker, this.clientIdentifier) {
+    client = MqttBrowserClient(broker, clientIdentifier);
+    client.port = 9001;
+    client.keepAlivePeriod = 20;
+    client.logging(on: true);
+    client.onDisconnected = _onDisconnected;
+    client.onConnected = _onConnected;
+    client.onSubscribed = _onSubscribed;
+  }
+  
+  static Future<MQTTService> create() async {
+    // Dead Code. Leaving it in case I need to get the IP dynamically.
+    // Doesn't really work, gets a weird IP
+    /* try {
+      final response = await http.get(Uri.parse('http://localhost:8080/api/inventory/broker'));
+      if (response.statusCode == 200) {
+        final brokerIp = response.body.trim();
+        final clientId = 'flutter_client${DateTime.now().millisecondsSinceEpoch}';
+        return MQTTService._internal(brokerIp, clientId);
+      } else {
+        throw Exception('Failed to load broker IP. Status Code: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Error fetching broker IP: $e');
+    }*/
+    final brokerIp = 'ws://192.168.0.19:9001/mqtt';
+    final clientId = 'flutter_client${DateTime.now().millisecondsSinceEpoch}';
+    return MQTTService._internal(brokerIp, clientId);
+  }
+  
+  Future<void> connect() async {
+    final connectMessage = MqttConnectMessage().withClientIdentifier(clientIdentifier).startClean().withWillQos(MqttQos.atLeastOnce);
+    client.connectionMessage = connectMessage;
+    try {
+      await client.connect();
+    } catch (e) {
+      print('MQTT connect exception: $e');
+      client.disconnect();
+    }
+    if (client.connectionStatus!.state == MqttConnectionState.connected) print('MQTT Connected');
+    else {
+      print('MQTT Connection failed: ${client.connectionStatus}');
+      client.disconnect();
+    }
+  }
+
+  void subscribe(String topic) {
+    client.subscribe(topic, MqttQos.atLeastOnce);
+  }
+
+  void publish(String topic, String message) {
+    final builder = MqttClientPayloadBuilder();
+    builder.addString(message);
+    client.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!);
+  }
+
+  void _onConnected() {
+    print('MQTT connected');
+  }
+
+  void _onDisconnected() {
+    print('MQTT disconnected');
+  }
+
+  void _onSubscribed(String topic) {
+    print('Subscribed to topic: $topic');
   }
 }
 
@@ -300,6 +419,32 @@ class _BlinkingTextState extends State<BlinkingText> with SingleTickerProviderSt
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//                       🖨 SETTINGS SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
+class SettingsScreen extends StatefulWidget {
+
+  SettingsScreen();
+
+  @override
+  _SettingsScreenState createState() => _SettingsScreenState();
+}
+
+//TODO:
+//This would ideally get the IP dynamically
+class _SettingsScreenState extends State<SettingsScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Settings'),
+      ),
+      body: Padding(padding: const EdgeInsets.all(16.0),
+      child: Text('Mosquitto Broker IP: 192.168.0.19'),
+      ),
+    );
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 //                             📦 ITEM MODEL
 // ─────────────────────────────────────────────────────────────────────────────
 class Item {
@@ -329,9 +474,4 @@ class AlertScreen extends StatelessWidget {
 class ReportsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const Center(child: Text('Reports Screen'));
-}
-
-class SettingsScreen extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => const Center(child: Text('Settings Screen'));
 }
