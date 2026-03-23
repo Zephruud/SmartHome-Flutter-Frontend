@@ -1,414 +1,493 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-void main() {
-  runApp(ShelfManagementApp());
+// ================== DATA MODELS ==================
+class Device {
+  final String id;
+  final String name;
+  final String type;
+  bool isOn;
+
+  // value is used for sensors (temperature/humidity)
+  final double? value;
+
+  Device({
+    required this.id,
+    required this.name,
+    required this.type,
+    required this.isOn,
+    required this.value,
+  });
+
+  factory Device.fromJson(Map<String, dynamic> json) {
+    final v = json['value'];
+    return Device(
+      id: (json['id'] ?? '').toString(),
+      name: (json['name'] ?? '').toString(),
+      type: (json['type'] ?? 'OTHER').toString(),
+      isOn: json['on'] ?? false,
+      value: (v is num) ? v.toDouble() : null,
+    );
+  }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ROOT APP
-// ─────────────────────────────────────────────────────────────────────────────
-class ShelfManagementApp extends StatelessWidget {
+class Room {
+  final String id;
+  final String name;
+  final List<Device> devices;
+
+  Room({required this.id, required this.name, required this.devices});
+
+  factory Room.fromJson(Map<String, dynamic> json) {
+    final deviceList = (json['devices'] as List<dynamic>? ?? [])
+        .map((d) => Device.fromJson(d as Map<String, dynamic>))
+        .toList();
+    return Room(
+      id: (json['id'] ?? '').toString(),
+      name: (json['name'] ?? '').toString(),
+      devices: deviceList,
+    );
+  }
+}
+
+// ================== BACKEND ==================
+const String backendBaseUrl = 'https://smarthome-backend-production-2612.up.railway.app';
+
+Future<List<Room>> fetchRooms() async {
+  final url = '$backendBaseUrl/api/rooms';
+  final response = await http.get(Uri.parse(url));
+  if (response.statusCode != 200) {
+    throw Exception('Failed to load rooms: ${response.statusCode}');
+  }
+  final data = json.decode(response.body) as List<dynamic>;
+  return data.map((room) => Room.fromJson(room)).toList();
+}
+
+Future<Room> fetchRoomById(String roomId) async {
+  final url = '$backendBaseUrl/api/rooms/$roomId';
+  final response = await http.get(Uri.parse(url));
+  if (response.statusCode != 200) {
+    throw Exception('Failed to refresh room: ${response.statusCode}');
+  }
+  return Room.fromJson(json.decode(response.body));
+}
+
+Future<void> toggleDeviceOnBackend(Room room, Device device, bool newState) async {
+  final url = '$backendBaseUrl/api/rooms/${room.id}/devices/${device.id}';
+  final body = jsonEncode({'on': newState});
+
+  final response = await http.patch(
+    Uri.parse(url),
+    headers: {'Content-Type': 'application/json'},
+    body: body,
+  );
+
+  if (response.statusCode != 200) {
+    throw Exception('Failed to toggle device: ${response.statusCode} ${response.body}');
+  }
+}
+
+// ✅ ADD DEVICE
+Future<void> addDeviceOnBackend(String roomId, String name, String type) async {
+  final url = '$backendBaseUrl/api/rooms/$roomId/devices';
+  final res = await http.post(
+    Uri.parse(url),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'name': name, 'type': type}),
+  );
+  if (res.statusCode != 200 && res.statusCode != 201) {
+    throw Exception('Failed to add device: ${res.statusCode} ${res.body}');
+  }
+}
+
+// ✅ DELETE DEVICE
+Future<void> deleteDeviceOnBackend(String roomId, String deviceId) async {
+  final url = '$backendBaseUrl/api/rooms/$roomId/devices/$deviceId';
+  final res = await http.delete(Uri.parse(url));
+  if (res.statusCode != 200 && res.statusCode != 204) {
+    throw Exception('Failed to delete device: ${res.statusCode} ${res.body}');
+  }
+}
+
+// ================== SAVE ENERGY MODE ==================
+Future<bool> fetchSaveEnergyMode() async {
+  final url = '$backendBaseUrl/api/modes/save-energy';
+  final res = await http.get(Uri.parse(url));
+  if (res.statusCode != 200) throw Exception('Failed to fetch save energy mode');
+  final data = json.decode(res.body) as Map<String, dynamic>;
+  return data['enabled'] == true;
+}
+
+Future<bool> setSaveEnergyMode(bool enabled) async {
+  final url = '$backendBaseUrl/api/modes/save-energy';
+  final res = await http.put(
+    Uri.parse(url),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'enabled': enabled}),
+  );
+  if (res.statusCode != 200) throw Exception('Failed to set save energy mode');
+  final data = json.decode(res.body) as Map<String, dynamic>;
+  return data['enabled'] == true;
+}
+
+// ================== HELPERS ==================
+String norm(String s) => s.toLowerCase().replaceAll('_', '').replaceAll(' ', '');
+
+bool isLight(Device d) => norm(d.type) == 'light';
+bool isHeater(Device d) => norm(d.type) == 'heater';
+bool isWindow(Device d) => norm(d.type) == 'window';
+bool isDoorLock(Device d) => norm(d.type) == 'doorlock';
+
+bool isTemperature(Device d) => norm(d.type) == 'temperature';
+bool isHumidity(Device d) => norm(d.type) == 'humidity' || norm(d.type) == 'humid';
+
+bool isLivingRoomName(String name) => name.toLowerCase().trim() == 'living room';
+
+IconData getRoomIcon(String roomName) {
+  switch (roomName.toLowerCase()) {
+    case 'living room':
+      return Icons.weekend;
+    case 'kitchen':
+      return Icons.restaurant;
+    case 'bedroom':
+      return Icons.bed;
+    case 'bathroom':
+      return Icons.bathtub;
+    case 'keller':
+    case 'basement':
+      return Icons.warehouse;
+    case 'store room':
+    case 'storeroom':
+    case 'storage room':
+      return Icons.inventory;
+    default:
+      return Icons.home;
+  }
+}
+
+IconData getDeviceIcon(String type) {
+  switch (norm(type)) {
+    case 'light':
+      return Icons.lightbulb;
+    case 'heater':
+      return Icons.fireplace;
+    case 'doorlock':
+      return Icons.lock;
+    case 'temperature':
+      return Icons.thermostat;
+    case 'humidity':
+    case 'humid':
+      return Icons.water_drop;
+    case 'window':
+      return Icons.window;
+    default:
+      return Icons.devices_other;
+  }
+}
+
+double? firstTemp(Room r) {
+  for (final d in r.devices) {
+    if (isTemperature(d) && d.value != null) return d.value;
+  }
+  return null;
+}
+
+double? firstHum(Room r) {
+  for (final d in r.devices) {
+    if (isHumidity(d) && d.value != null) return d.value;
+  }
+  return null;
+}
+
+int lightsOn(Room r) => r.devices.where((d) => isLight(d) && d.isOn).length;
+int heatersOn(Room r) => r.devices.where((d) => isHeater(d) && d.isOn).length;
+int windowsOpen(Room r) => r.devices.where((d) => isWindow(d) && d.isOn).length;
+
+Device? firstWindow(Room r) {
+  for (final d in r.devices) {
+    if (isWindow(d)) return d;
+  }
+  return null;
+}
+
+Color glowColor(Device device, Animation<double> heaterAnim) {
+  final t = norm(device.type);
+  if (t == 'light' && device.isOn) return Colors.yellow.withOpacity(0.80);
+  if (t == 'heater' && device.isOn) return Color.lerp(Colors.redAccent, Colors.orange, heaterAnim.value)!;
+  if (t == 'window' && device.isOn) return Colors.lightBlueAccent.withOpacity(0.50);
+
+  if (t == 'temperature' || t == 'humidity' || t == 'humid') return Colors.blueGrey.shade100;
+  return Colors.grey.shade200;
+}
+
+String formatTime(DateTime dt) {
+  String two(int x) => x.toString().padLeft(2, '0');
+  return '${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)}';
+}
+
+// ================== MAIN APP ==================
+void main() => runApp(SmartHomeApp());
+
+class SmartHomeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Shelf Management',
       debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.system,
-      theme: ThemeData.light(),
-      darkTheme: ThemeData.dark(),
-      home: ShelfDashboard(),
+      theme: ThemeData(fontFamily: 'Arial'),
+      home: RoomListScreen(),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN DASHBOARD WITH SIDEBAR
-// ─────────────────────────────────────────────────────────────────────────────
-class ShelfDashboard extends StatefulWidget {
+// ================== ROOM LIST SCREEN ==================
+class RoomListScreen extends StatefulWidget {
   @override
-  _ShelfDashboardState createState() => _ShelfDashboardState();
+  State<RoomListScreen> createState() => _RoomListScreenState();
 }
 
-class _ShelfDashboardState extends State<ShelfDashboard> {
-  int _selectedIndex = 0;
+class _RoomListScreenState extends State<RoomListScreen> {
+  late Future<List<Room>> _futureRooms;
 
-  final List<Widget> _screens = [
-    InventoryScreen(),
-    Center(child: Text("Alerts")),  // you can later replace this
-    ReportsScreen(),
-    SettingsScreen(),
-  ];
+  bool _saveEnergyEnabled = false;
+  bool _loadingEnergy = false;
 
-  void _onItemTapped(int index) {
-    setState(() => _selectedIndex = index);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Row(
-        children: [
-          // Sidebar
-          Container(
-            width: 260,
-            color: Theme.of(context).primaryColor,
-            child: Column(
-              children: [
-                const SizedBox(height: 50),
-                const Text(
-                  'Shelf Manager',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
-                const SizedBox(height: 20),
-                _buildSidebarButton(Icons.inventory, 'Inventory', 0),
-                _buildSidebarButton(Icons.warning,   'Alerts',    1),
-                _buildSidebarButton(Icons.bar_chart, 'Reports',   2),
-                _buildSidebarButton(Icons.settings,  'Settings',  3),
-              ],
-            ),
-          ),
-          // Main content
-          Expanded(child: _screens[_selectedIndex]),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSidebarButton(IconData icon, String label, int index) {
-    return GestureDetector(
-      onTap: () => _onItemTapped(index),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
-        child: Row(
-          children: [
-            Icon(icon, color: Colors.white, size: 28),
-            const SizedBox(width: 15),
-            Text(label, style: const TextStyle(color: Colors.white, fontSize: 18)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DATA MODEL
-// ─────────────────────────────────────────────────────────────────────────────
-class Item {
-  final int? id;
-  final String name;
-  int quantity;
-  final double price;
-
-  Item({this.id, required this.name, required this.quantity, required this.price});
-
-  factory Item.fromJson(Map<String, dynamic> json) => Item(
-        id: json['id'],
-        name: json['name'],
-        quantity: json['quantity'],
-        price: (json['price'] as num).toDouble(),
-      );
-
-  Map<String, dynamic> toJson() => {
-        'name': name,
-        'quantity': quantity,
-        'price': price,
-      };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// INVENTORY SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
-class InventoryScreen extends StatefulWidget {
-  @override
-  _InventoryScreenState createState() => _InventoryScreenState();
-}
-
-class _InventoryScreenState extends State<InventoryScreen> {
-  List<Item> items = [];
-  String searchQuery = "";
-  String sortOption   = 'Name';
+  DateTime _lastUpdated = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    fetchInventoryItems();
+    _futureRooms = fetchRooms();
+
+    fetchSaveEnergyMode().then((v) {
+      if (mounted) setState(() => _saveEnergyEnabled = v);
+    }).catchError((_) {});
   }
 
-  Future<void> fetchInventoryItems() async {
-    final response = await http.get(Uri.parse('http://localhost:8080/api/inventory/items'));
-    if (response.statusCode == 200) {
-      final List<dynamic> data = json.decode(response.body);
-      setState(() => items = data.map((e) => Item.fromJson(e)).toList());
-    } else {
-      throw Exception('Failed to load items');
+  Future<void> _refresh() async {
+    setState(() {
+      _futureRooms = fetchRooms();
+      _lastUpdated = DateTime.now();
+    });
+    await _futureRooms;
+
+    try {
+      final v = await fetchSaveEnergyMode();
+      if (mounted) setState(() => _saveEnergyEnabled = v);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleSaveEnergy(bool v) async {
+    setState(() => _loadingEnergy = true);
+    try {
+      final newVal = await setSaveEnergyMode(v);
+      if (mounted) setState(() => _saveEnergyEnabled = newVal);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save Energy failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingEnergy = false);
     }
   }
 
-  Future<void> addNewItem(String name, int qty, double price) async {
-    final newItem = Item(name: name, quantity: qty, price: price);
-    final resp = await http.post(
-      Uri.parse('http://localhost:8080/api/inventory/items'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(newItem.toJson()),
-    );
-    if (resp.statusCode == 200) fetchInventoryItems();
-  }
-
-  Future<void> updateItem(int id, String name, int qty, double price) async {
-    final updated = Item(id: id, name: name, quantity: qty, price: price);
-    final resp = await http.put(
-      Uri.parse('http://localhost:8080/api/inventory/items/$id'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(updated.toJson()),
-    );
-    if (resp.statusCode == 200) fetchInventoryItems();
-  }
-
-  Future<void> deleteItem(int id) async {
-    final resp = await http.delete(
-      Uri.parse('http://localhost:8080/api/inventory/items/$id'),
-    );
-    if (resp.statusCode == 200) fetchInventoryItems();
-  }
-
-  List<Item> _sortedFiltered() {
-    final filtered = items
-        .where((it) => it.name.toLowerCase().contains(searchQuery.toLowerCase()))
-        .toList();
-    switch (sortOption) {
-      case 'Quantity':
-        filtered.sort((a, b) => b.quantity.compareTo(a.quantity));
-        break;
-      case 'Price':
-        filtered.sort((a, b) => b.price.compareTo(a.price));
-        break;
-      case 'Name':
-      default:
-        filtered.sort((a, b) => a.name.compareTo(b.name));
-    }
-    return filtered;
-  }
-
-  Widget _itemDialog({Item? item}) {
-    final nameCtl  = TextEditingController(text: item?.name ?? "");
-    final qtyCtl   = TextEditingController(text: item?.quantity.toString() ?? "");
-    final priceCtl = TextEditingController(text: item?.price.toString() ?? "");
-    return AlertDialog(
-      title: Text(item == null ? 'Add Item' : 'Edit Item'),
-      content: Column(
+  Widget _chip(String text, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.90),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          TextField(controller: nameCtl,  decoration: InputDecoration(labelText: 'Name')),
-          TextField(controller: qtyCtl,   decoration: InputDecoration(labelText: 'Quantity'), keyboardType: TextInputType.number),
-          TextField(controller: priceCtl, decoration: InputDecoration(labelText: 'Price'),    keyboardType: TextInputType.number),
+          Icon(icon, size: 16, color: Colors.black54),
+          const SizedBox(width: 6),
+          Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
         ],
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
-        ElevatedButton(
-          onPressed: () {
-            final name  = nameCtl.text.trim();
-            final qty   = int.tryParse(qtyCtl.text) ?? 0;
-            final price = double.tryParse(priceCtl.text) ?? 0.0;
-            if (name.isNotEmpty) {
-              if (item == null) addNewItem(name, qty, price);
-              else updateItem(item.id!, name, qty, price);
-              Navigator.pop(context);
-            }
-          },
-          child: Text(item == null ? 'Add' : 'Save'),
-        )
-      ],
+    );
+  }
+
+  Widget _homeOverviewCard(List<Room> rooms) {
+    final totalLightsOn = rooms.fold(0, (acc, r) => acc + lightsOn(r));
+    final totalHeatersOn = rooms.fold(0, (acc, r) => acc + heatersOn(r));
+    final totalWindowsOpen = rooms.fold(0, (acc, r) => acc + windowsOpen(r));
+
+    final temps = rooms.map(firstTemp).whereType<double>().toList();
+    final hums = rooms.map(firstHum).whereType<double>().toList();
+
+    final avgTemp = temps.isEmpty ? null : temps.reduce((a, b) => a + b) / temps.length;
+    final avgHum = hums.isEmpty ? null : hums.reduce((a, b) => a + b) / hums.length;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 12,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.dashboard_customize, color: Colors.black87),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Home Overview',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+              ),
+              Text(
+                'Updated ${formatTime(_lastUpdated)}',
+                style: const TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _chip('$totalLightsOn lights ON', Icons.lightbulb_outline),
+              _chip('$totalHeatersOn heaters ON', Icons.fireplace),
+              _chip('$totalWindowsOpen windows OPEN', Icons.window),
+              if (avgTemp != null) _chip('${avgTemp.toStringAsFixed(1)}°C avg', Icons.thermostat),
+              if (avgHum != null) _chip('${avgHum.toStringAsFixed(0)}% avg', Icons.water_drop),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(Icons.eco, color: _saveEnergyEnabled ? Colors.green : Colors.black45, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                'Save Energy is ${_saveEnergyEnabled ? "ON" : "OFF"}',
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.black87),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final list = _sortedFiltered();
     return Scaffold(
+      backgroundColor: Colors.blueGrey.shade50,
       appBar: AppBar(
-        backgroundColor: Colors.purple,
-        title: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                decoration: InputDecoration(hintText: 'Search…'),
-                onChanged: (v) => setState(() => searchQuery = v),
-              ),
+        backgroundColor: Colors.blueAccent,
+        title: const Text('Smart Home Dashboard'),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _refresh),
+        ],
+        elevation: 0,
+      ),
+
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 10,
+                  spreadRadius: 2,
+                ),
+              ],
             ),
-            const SizedBox(width: 10),
-            DropdownButton<String>(
-              value: sortOption,
-              icon: Icon(Icons.sort, color: Colors.white),
-              dropdownColor: Colors.white,
-              items: ['Name', 'Quantity', 'Price']
-                  .map((opt) => DropdownMenuItem(value: opt, child: Text(opt)))
-                  .toList(),
-              onChanged: (v) => setState(() => sortOption = v!),
+            child: Row(
+              children: [
+                const Icon(Icons.eco, color: Colors.green),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Save Energy Mode',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                if (_loadingEnergy)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  Switch(
+                    value: _saveEnergyEnabled,
+                    onChanged: _toggleSaveEnergy,
+                  ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.purple,
-        child: Icon(Icons.add),
-        onPressed: () => showDialog(context: context, builder: (_) => _itemDialog()),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: LayoutBuilder(
-          builder: (ctx, cons) {
-            final cross = cons.maxWidth < 600
-                ? 1
-                : cons.maxWidth < 900
-                    ? 2
-                    : 3;
-            return GridView.builder(
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: cross,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.6,
-              ),
-              itemCount: list.length,
-              itemBuilder: (ctx, i) {
-                final it = list[i];
+
+      body: FutureBuilder<List<Room>>(
+        future: _futureRooms,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text('Failed: ${snapshot.error}'));
+          }
+
+          final rooms = snapshot.data!;
+
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              itemCount: rooms.length + 1,
+              itemBuilder: (context, index) {
+                if (index == 0) return _homeOverviewCard(rooms);
+
+                final room = rooms[index - 1];
+
                 return Card(
-                  elevation: 3,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(it.name,    style: Theme.of(context).textTheme.titleMedium),
-                        const SizedBox(height: 5),
-                        Text('€${it.price.toStringAsFixed(2)}', style: TextStyle(color: Colors.green)),
-                        const SizedBox(height: 5),
-                        Text('Qty: ${it.quantity}', style: Theme.of(context).textTheme.bodyMedium),
-                        if (it.quantity == 0) BlinkingText(),
-                        const SizedBox(height: 6),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            IconButton(
-                              icon: Icon(Icons.remove_circle_outline, color: Colors.purple),
-                              onPressed: it.quantity > 0
-                                  ? () {
-                                      setState(() {
-                                        it.quantity--;
-                                        updateItem(it.id!, it.name, it.quantity, it.price);
-                                      });
-                                    }
-                                  : null,
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.add_circle_outline, color: Colors.purple),
-                              onPressed: () {
-                                setState(() {
-                                  it.quantity++;
-                                  updateItem(it.id!, it.name, it.quantity, it.price);
-                                });
-                              },
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.delete, color: Colors.red),
-                              onPressed: () => deleteItem(it.id!),
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.edit, color: Colors.orange),
-                              onPressed: () => showDialog(
-                                context: context,
-                                builder: (_) => _itemDialog(item: it),
-                              ),
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.refresh, color: Colors.blue),
-                              tooltip: 'Reload all',
-                              onPressed: fetchInventoryItems,
-                            ),
-                          ],
+                  margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  elevation: 4,
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    leading: Icon(getRoomIcon(room.name), color: Colors.blueAccent, size: 30),
+                    title: Text(
+                      room.name,
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                    ),
+                    trailing: const Icon(Icons.chevron_right, color: Colors.black54),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => RoomDetailScreen(
+                          room: room,
+                          saveEnergyEnabled: _saveEnergyEnabled,
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 );
               },
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// REPORTS SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
-class ReportsScreen extends StatefulWidget {
-  @override
-  _ReportsScreenState createState() => _ReportsScreenState();
-}
-
-class _ReportsScreenState extends State<ReportsScreen> {
-  late Future<List<Item>> _futureItems;
-
-  @override
-  void initState() {
-    super.initState();
-    _futureItems = fetchItemsForReport();
-  }
-
-  Future<List<Item>> fetchItemsForReport() async {
-    final resp = await http.get(Uri.parse('http://localhost:8080/api/inventory/items'));
-    if (resp.statusCode == 200) {
-      final data = json.decode(resp.body) as List<dynamic>;
-      return data.map((e) => Item.fromJson(e)).toList();
-    } else {
-      throw Exception('Failed to load report items');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Inventory Report'),
-        backgroundColor: Colors.purple,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.refresh),
-            onPressed: () => setState(() => _futureItems = fetchItemsForReport()),
-          )
-        ],
-      ),
-      body: FutureBuilder<List<Item>>(
-        future: _futureItems,
-        builder: (ctx, snap) {
-          if (snap.connectionState == ConnectionState.waiting)
-            return Center(child: CircularProgressIndicator());
-          if (snap.hasError)
-            return Center(child: Text('Error: ${snap.error}'));
-
-          final list = snap.data!;
-          if (list.isEmpty)
-            return Center(child: Text('No items in inventory.'));
-
-          return ListView.separated(
-            padding: const EdgeInsets.all(12),
-            itemCount: list.length,
-            separatorBuilder: (_, __) => Divider(),
-            itemBuilder: (ctx, i) {
-              final it = list[i];
-              return ListTile(
-                title: Text(it.name, style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('€${it.price.toStringAsFixed(2)} • Qty: ${it.quantity}'),
-                trailing: it.quantity == 0 ? Icon(Icons.error_outline, color: Colors.red) : null,
-              );
-            },
+            ),
           );
         },
       ),
@@ -416,56 +495,307 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SETTINGS SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
-class SettingsScreen extends StatelessWidget {
+// ================== ROOM DETAIL SCREEN ==================
+class RoomDetailScreen extends StatefulWidget {
+  final Room room;
+  final bool saveEnergyEnabled;
+
+  const RoomDetailScreen({
+    Key? key,
+    required this.room,
+    required this.saveEnergyEnabled,
+  }) : super(key: key);
+
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: const Padding(
-        padding: EdgeInsets.all(16.0),
-        child: Text('Mosquitto Broker IP: 192.168.0.191'),
-      ),
-    );
-  }
+  State<RoomDetailScreen> createState() => _RoomDetailScreenState();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BLINKING REFILL WARNING
-// ─────────────────────────────────────────────────────────────────────────────
-class BlinkingText extends StatefulWidget {
-  @override
-  _BlinkingTextState createState() => _BlinkingTextState();
-}
+class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerProviderStateMixin {
+  late Room _room;
+  Timer? _pollTimer;
+  late AnimationController _heaterAnimation;
 
-class _BlinkingTextState extends State<BlinkingText>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+  bool get _isLivingRoom => isLivingRoomName(_room.name);
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
+    _room = widget.room;
+
+    _heaterAnimation = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
+
+    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      try {
+        final fresh = await fetchRoomById(_room.id);
+        if (mounted) setState(() => _room = fresh);
+      } catch (_) {}
+    });
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _pollTimer?.cancel();
+    _heaterAnimation.dispose();
     super.dispose();
+  }
+
+  Future<void> _refreshRoom() async {
+    final fresh = await fetchRoomById(_room.id);
+    setState(() => _room = fresh);
+  }
+
+  Future<void> _handleToggle(Device device, bool newValue) async {
+    if (isTemperature(device) || isHumidity(device)) return;
+    if (_isLivingRoom && widget.saveEnergyEnabled && isHeater(device)) return;
+
+    final oldValue = device.isOn;
+    setState(() => device.isOn = newValue);
+
+    try {
+      await toggleDeviceOnBackend(_room, device, newValue);
+      await _refreshRoom();
+    } catch (e) {
+      setState(() => device.isOn = oldValue);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to toggle device: $e')),
+      );
+    }
+  }
+
+  bool get _windowOpen {
+    final w = firstWindow(_room);
+    return w != null && w.isOn;
+  }
+
+  bool get _heaterLocked => _isLivingRoom && widget.saveEnergyEnabled;
+  bool get _showWindowRuleBanner => _heaterLocked && _windowOpen;
+
+  // ---------- ADD / DELETE UI ----------
+  Future<void> _showAddDeviceDialog() async {
+    final nameCtrl = TextEditingController();
+    String selectedType = 'LIGHT';
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Add device'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'Device name'),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: selectedType,
+              items: const [
+                DropdownMenuItem(value: 'LIGHT', child: Text('LIGHT')),
+                DropdownMenuItem(value: 'HEATER', child: Text('HEATER')),
+                DropdownMenuItem(value: 'WINDOW', child: Text('WINDOW')),
+                DropdownMenuItem(value: 'DOOR_LOCK', child: Text('DOOR_LOCK')),
+                DropdownMenuItem(value: 'TEMPERATURE', child: Text('TEMPERATURE')),
+                DropdownMenuItem(value: 'HUMIDITY', child: Text('HUMIDITY')),
+              ],
+              onChanged: (v) => selectedType = v ?? selectedType,
+              decoration: const InputDecoration(labelText: 'Type'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    final name = nameCtrl.text.trim();
+    if (name.isEmpty) return;
+
+    try {
+      await addDeviceOnBackend(_room.id, name, selectedType);
+      await _refreshRoom();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add device failed: $e')));
+    }
+  }
+
+  Future<void> _confirmDelete(Device d) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete device?'),
+        content: Text('Delete "${d.name}"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    try {
+      await deleteDeviceOnBackend(_room.id, d.id);
+      await _refreshRoom();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _controller,
-      child: const Text(
-        'REFILL',
-        style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16),
+    return Scaffold(
+      backgroundColor: Colors.blueGrey.shade50,
+      appBar: AppBar(
+        backgroundColor: Colors.blueAccent,
+        title: Text(_room.name),
+        actions: [
+          IconButton(icon: const Icon(Icons.add), onPressed: _showAddDeviceDialog),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _refreshRoom),
+        ],
+      ),
+      body: AnimatedBuilder(
+        animation: _heaterAnimation,
+        builder: (context, _) {
+          return RefreshIndicator(
+            onRefresh: _refreshRoom,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (_showWindowRuleBanner)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.orange.withOpacity(0.40)),
+                    ),
+                    child: Row(
+                      children: const [
+                        Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Window open → heater disabled',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                ..._room.devices.map((device) {
+                  final cardColor = glowColor(device, _heaterAnimation);
+
+                  final isTemp = isTemperature(device);
+                  final isHum = isHumidity(device);
+                  final isSensor = isTemp || isHum;
+
+                  final heaterAutoLocked = _heaterLocked && isHeater(device);
+                  final subtitle = () {
+                    if (isTemp) return device.value == null ? '— °C' : '${device.value!.toStringAsFixed(1)} °C';
+                    if (isHum) return device.value == null ? '— %' : '${device.value!.toStringAsFixed(0)} %';
+                    if (isHeater(device)) return heaterAutoLocked ? 'Save Energy ON • Auto controlled' : 'Manual heater control';
+                    if (isWindow(device)) return device.isOn ? 'OPEN' : 'CLOSED';
+                    if (isDoorLock(device)) return device.isOn ? 'LOCKED' : 'UNLOCKED';
+                    return device.isOn ? 'ON' : 'OFF';
+                  }();
+
+                  return AnimatedContainer(
+                    duration: const Duration(milliseconds: 350),
+                    curve: Curves.easeOutCubic,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: (device.isOn && !isSensor)
+                          ? [
+                              BoxShadow(
+                                color: cardColor.withOpacity(0.6),
+                                blurRadius: 12,
+                                spreadRadius: 4,
+                              ),
+                            ]
+                          : [],
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(getDeviceIcon(device.type), size: 32, color: Colors.black87),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                device.name,
+                                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                subtitle,
+                                style: const TextStyle(fontSize: 14, color: Colors.black54, fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // right side
+                        if (isSensor)
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.black45),
+                            onPressed: () => _confirmDelete(device),
+                            tooltip: 'Delete device',
+                          )
+                        else if (heaterAutoLocked)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.lock, color: Colors.black54),
+                              const SizedBox(width: 6),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, color: Colors.black45),
+                                onPressed: () => _confirmDelete(device),
+                                tooltip: 'Delete device',
+                              ),
+                            ],
+                          )
+                        else
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Switch(
+                                value: device.isOn,
+                                onChanged: (value) => _handleToggle(device, value),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, color: Colors.black45),
+                                onPressed: () => _confirmDelete(device),
+                                tooltip: 'Delete device',
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
