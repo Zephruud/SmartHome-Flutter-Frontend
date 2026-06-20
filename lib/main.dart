@@ -1,4 +1,4 @@
-import 'dart:async';
+ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -9,8 +9,6 @@ class Device {
   final String name;
   final String type;
   bool isOn;
-
-  // value is used for sensors (temperature/humidity)
   final double? value;
 
   Device({
@@ -44,6 +42,7 @@ class Room {
     final deviceList = (json['devices'] as List<dynamic>? ?? [])
         .map((d) => Device.fromJson(d as Map<String, dynamic>))
         .toList();
+
     return Room(
       id: (json['id'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
@@ -53,14 +52,17 @@ class Room {
 }
 
 // ================== BACKEND ==================
-const String backendBaseUrl = 'https://smarthome-backend-production-2612.up.railway.app';
+const String backendBaseUrl =
+    'https://smarthome-backend-production-2612.up.railway.app';
 
 Future<List<Room>> fetchRooms() async {
   final url = '$backendBaseUrl/api/rooms';
   final response = await http.get(Uri.parse(url));
+
   if (response.statusCode != 200) {
     throw Exception('Failed to load rooms: ${response.statusCode}');
   }
+
   final data = json.decode(response.body) as List<dynamic>;
   return data.map((room) => Room.fromJson(room)).toList();
 }
@@ -68,13 +70,16 @@ Future<List<Room>> fetchRooms() async {
 Future<Room> fetchRoomById(String roomId) async {
   final url = '$backendBaseUrl/api/rooms/$roomId';
   final response = await http.get(Uri.parse(url));
+
   if (response.statusCode != 200) {
     throw Exception('Failed to refresh room: ${response.statusCode}');
   }
+
   return Room.fromJson(json.decode(response.body));
 }
 
-Future<void> toggleDeviceOnBackend(Room room, Device device, bool newState) async {
+Future<void> toggleDeviceOnBackend(
+    Room room, Device device, bool newState) async {
   final url = '$backendBaseUrl/api/rooms/${room.id}/devices/${device.id}';
   final body = jsonEncode({'on': newState});
 
@@ -85,27 +90,30 @@ Future<void> toggleDeviceOnBackend(Room room, Device device, bool newState) asyn
   );
 
   if (response.statusCode != 200) {
-    throw Exception('Failed to toggle device: ${response.statusCode} ${response.body}');
+    throw Exception(
+        'Failed to toggle device: ${response.statusCode} ${response.body}');
   }
 }
 
-// ✅ ADD DEVICE
 Future<void> addDeviceOnBackend(String roomId, String name, String type) async {
   final url = '$backendBaseUrl/api/rooms/$roomId/devices';
+
   final res = await http.post(
     Uri.parse(url),
     headers: {'Content-Type': 'application/json'},
     body: jsonEncode({'name': name, 'type': type}),
   );
+
   if (res.statusCode != 200 && res.statusCode != 201) {
     throw Exception('Failed to add device: ${res.statusCode} ${res.body}');
   }
 }
 
-// ✅ DELETE DEVICE
 Future<void> deleteDeviceOnBackend(String roomId, String deviceId) async {
   final url = '$backendBaseUrl/api/rooms/$roomId/devices/$deviceId';
+
   final res = await http.delete(Uri.parse(url));
+
   if (res.statusCode != 200 && res.statusCode != 204) {
     throw Exception('Failed to delete device: ${res.statusCode} ${res.body}');
   }
@@ -115,25 +123,42 @@ Future<void> deleteDeviceOnBackend(String roomId, String deviceId) async {
 Future<bool> fetchSaveEnergyMode() async {
   final url = '$backendBaseUrl/api/modes/save-energy';
   final res = await http.get(Uri.parse(url));
-  if (res.statusCode != 200) throw Exception('Failed to fetch save energy mode');
+
+  if (res.statusCode != 200) {
+    throw Exception('Failed to fetch save energy mode');
+  }
+
   final data = json.decode(res.body) as Map<String, dynamic>;
   return data['enabled'] == true;
 }
 
 Future<bool> setSaveEnergyMode(bool enabled) async {
   final url = '$backendBaseUrl/api/modes/save-energy';
+
   final res = await http.put(
     Uri.parse(url),
     headers: {'Content-Type': 'application/json'},
     body: jsonEncode({'enabled': enabled}),
   );
-  if (res.statusCode != 200) throw Exception('Failed to set save energy mode');
+
+  if (res.statusCode != 200) {
+    throw Exception('Failed to set save energy mode');
+  }
+
   final data = json.decode(res.body) as Map<String, dynamic>;
   return data['enabled'] == true;
 }
 
 // ================== HELPERS ==================
-String norm(String s) => s.toLowerCase().replaceAll('_', '').replaceAll(' ', '');
+String norm(String s) =>
+    s.toLowerCase().replaceAll('_', '').replaceAll(' ', '');
+
+String displayRoomName(String name) {
+  if (name.toLowerCase().trim() == 'keller') {
+    return 'Cellar';
+  }
+  return name;
+}
 
 bool isLight(Device d) => norm(d.type) == 'light';
 bool isHeater(Device d) => norm(d.type) == 'heater';
@@ -141,9 +166,11 @@ bool isWindow(Device d) => norm(d.type) == 'window';
 bool isDoorLock(Device d) => norm(d.type) == 'doorlock';
 
 bool isTemperature(Device d) => norm(d.type) == 'temperature';
-bool isHumidity(Device d) => norm(d.type) == 'humidity' || norm(d.type) == 'humid';
+bool isHumidity(Device d) =>
+    norm(d.type) == 'humidity' || norm(d.type) == 'humid';
 
-bool isLivingRoomName(String name) => name.toLowerCase().trim() == 'living room';
+bool isLivingRoomName(String name) =>
+    name.toLowerCase().trim() == 'living room';
 
 IconData getRoomIcon(String roomName) {
   switch (roomName.toLowerCase()) {
@@ -155,7 +182,7 @@ IconData getRoomIcon(String roomName) {
       return Icons.bed;
     case 'bathroom':
       return Icons.bathtub;
-    case 'keller':
+    case 'cellar':
     case 'basement':
       return Icons.warehouse;
     case 'store room':
@@ -201,9 +228,14 @@ double? firstHum(Room r) {
   return null;
 }
 
-int lightsOn(Room r) => r.devices.where((d) => isLight(d) && d.isOn).length;
-int heatersOn(Room r) => r.devices.where((d) => isHeater(d) && d.isOn).length;
-int windowsOpen(Room r) => r.devices.where((d) => isWindow(d) && d.isOn).length;
+int lightsOn(Room r) =>
+    r.devices.where((d) => isLight(d) && d.isOn).length;
+
+int heatersOn(Room r) =>
+    r.devices.where((d) => isHeater(d) && d.isOn).length;
+
+int windowsOpen(Room r) =>
+    r.devices.where((d) => isWindow(d) && d.isOn).length;
 
 Device? firstWindow(Room r) {
   for (final d in r.devices) {
@@ -214,11 +246,27 @@ Device? firstWindow(Room r) {
 
 Color glowColor(Device device, Animation<double> heaterAnim) {
   final t = norm(device.type);
-  if (t == 'light' && device.isOn) return Colors.yellow.withOpacity(0.80);
-  if (t == 'heater' && device.isOn) return Color.lerp(Colors.redAccent, Colors.orange, heaterAnim.value)!;
-  if (t == 'window' && device.isOn) return Colors.lightBlueAccent.withOpacity(0.50);
 
-  if (t == 'temperature' || t == 'humidity' || t == 'humid') return Colors.blueGrey.shade100;
+  if (t == 'light' && device.isOn) {
+    return Colors.yellow.withOpacity(0.80);
+  }
+
+  if (t == 'heater' && device.isOn) {
+    return Color.lerp(
+      Colors.redAccent,
+      Colors.orange,
+      heaterAnim.value,
+    )!;
+  }
+
+  if (t == 'window' && device.isOn) {
+    return Colors.lightBlueAccent.withOpacity(0.50);
+  }
+
+  if (t == 'temperature' || t == 'humidity' || t == 'humid') {
+    return Colors.blueGrey.shade100;
+  }
+
   return Colors.grey.shade200;
 }
 
@@ -270,6 +318,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
       _futureRooms = fetchRooms();
       _lastUpdated = DateTime.now();
     });
+
     await _futureRooms;
 
     try {
@@ -280,6 +329,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
 
   Future<void> _toggleSaveEnergy(bool v) async {
     setState(() => _loadingEnergy = true);
+
     try {
       final newVal = await setSaveEnergyMode(v);
       if (mounted) setState(() => _saveEnergyEnabled = newVal);
@@ -307,7 +357,13 @@ class _RoomListScreenState extends State<RoomListScreen> {
         children: [
           Icon(icon, size: 16, color: Colors.black54),
           const SizedBox(width: 6),
-          Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+          Text(
+            text,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ],
       ),
     );
@@ -321,8 +377,11 @@ class _RoomListScreenState extends State<RoomListScreen> {
     final temps = rooms.map(firstTemp).whereType<double>().toList();
     final hums = rooms.map(firstHum).whereType<double>().toList();
 
-    final avgTemp = temps.isEmpty ? null : temps.reduce((a, b) => a + b) / temps.length;
-    final avgHum = hums.isEmpty ? null : hums.reduce((a, b) => a + b) / hums.length;
+    final avgTemp =
+        temps.isEmpty ? null : temps.reduce((a, b) => a + b) / temps.length;
+
+    final avgHum =
+        hums.isEmpty ? null : hums.reduce((a, b) => a + b) / hums.length;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 10),
@@ -348,12 +407,19 @@ class _RoomListScreenState extends State<RoomListScreen> {
               const Expanded(
                 child: Text(
                   'Home Overview',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
               Text(
                 'Updated ${formatTime(_lastUpdated)}',
-                style: const TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.black54,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
@@ -365,18 +431,30 @@ class _RoomListScreenState extends State<RoomListScreen> {
               _chip('$totalLightsOn lights ON', Icons.lightbulb_outline),
               _chip('$totalHeatersOn heaters ON', Icons.fireplace),
               _chip('$totalWindowsOpen windows OPEN', Icons.window),
-              if (avgTemp != null) _chip('${avgTemp.toStringAsFixed(1)}°C avg', Icons.thermostat),
-              if (avgHum != null) _chip('${avgHum.toStringAsFixed(0)}% avg', Icons.water_drop),
+              if (avgTemp != null)
+                _chip('${avgTemp.toStringAsFixed(1)}°C avg',
+                    Icons.thermostat),
+              if (avgHum != null)
+                _chip('${avgHum.toStringAsFixed(0)}% avg',
+                    Icons.water_drop),
             ],
           ),
           const SizedBox(height: 10),
           Row(
             children: [
-              Icon(Icons.eco, color: _saveEnergyEnabled ? Colors.green : Colors.black45, size: 18),
+              Icon(
+                Icons.eco,
+                color: _saveEnergyEnabled ? Colors.green : Colors.black45,
+                size: 18,
+              ),
               const SizedBox(width: 8),
               Text(
                 'Save Energy is ${_saveEnergyEnabled ? "ON" : "OFF"}',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.black87),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                ),
               ),
             ],
           ),
@@ -393,16 +471,21 @@ class _RoomListScreenState extends State<RoomListScreen> {
         backgroundColor: Colors.blueAccent,
         title: const Text('Smart Home Dashboard'),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _refresh),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refresh,
+          ),
         ],
         elevation: 0,
       ),
-
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 14,
+            ),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(18),
@@ -421,7 +504,10 @@ class _RoomListScreenState extends State<RoomListScreen> {
                 const Expanded(
                   child: Text(
                     'Save Energy Mode',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 if (_loadingEnergy)
@@ -440,13 +526,13 @@ class _RoomListScreenState extends State<RoomListScreen> {
           ),
         ),
       ),
-
       body: FutureBuilder<List<Room>>(
         future: _futureRooms,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
+
           if (snapshot.hasError) {
             return Center(child: Text('Failed: ${snapshot.error}'));
           }
@@ -465,16 +551,31 @@ class _RoomListScreenState extends State<RoomListScreen> {
 
                 return Card(
                   margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
                   elevation: 4,
                   child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    leading: Icon(getRoomIcon(room.name), color: Colors.blueAccent, size: 30),
-                    title: Text(
-                      room.name,
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
                     ),
-                    trailing: const Icon(Icons.chevron_right, color: Colors.black54),
+                    leading: Icon(
+                      getRoomIcon(displayRoomName(room.name)),
+                      color: Colors.blueAccent,
+                      size: 30,
+                    ),
+                    title: Text(
+                      displayRoomName(room.name),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    trailing: const Icon(
+                      Icons.chevron_right,
+                      color: Colors.black54,
+                    ),
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -510,7 +611,8 @@ class RoomDetailScreen extends StatefulWidget {
   State<RoomDetailScreen> createState() => _RoomDetailScreenState();
 }
 
-class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerProviderStateMixin {
+class _RoomDetailScreenState extends State<RoomDetailScreen>
+    with SingleTickerProviderStateMixin {
   late Room _room;
   Timer? _pollTimer;
   late AnimationController _heaterAnimation;
@@ -571,9 +673,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
   }
 
   bool get _heaterLocked => _isLivingRoom && widget.saveEnergyEnabled;
+
   bool get _showWindowRuleBanner => _heaterLocked && _windowOpen;
 
-  // ---------- ADD / DELETE UI ----------
   Future<void> _showAddDeviceDialog() async {
     final nameCtrl = TextEditingController();
     String selectedType = 'LIGHT';
@@ -597,7 +699,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
                 DropdownMenuItem(value: 'HEATER', child: Text('HEATER')),
                 DropdownMenuItem(value: 'WINDOW', child: Text('WINDOW')),
                 DropdownMenuItem(value: 'DOOR_LOCK', child: Text('DOOR_LOCK')),
-                DropdownMenuItem(value: 'TEMPERATURE', child: Text('TEMPERATURE')),
+                DropdownMenuItem(
+                    value: 'TEMPERATURE', child: Text('TEMPERATURE')),
                 DropdownMenuItem(value: 'HUMIDITY', child: Text('HUMIDITY')),
               ],
               onChanged: (v) => selectedType = v ?? selectedType,
@@ -606,8 +709,14 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Add'),
+          ),
         ],
       ),
     );
@@ -622,7 +731,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
       await _refreshRoom();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add device failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Add device failed: $e')),
+      );
     }
   }
 
@@ -633,7 +744,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
         title: const Text('Delete device?'),
         content: Text('Delete "${d.name}"?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -650,7 +764,9 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
       await _refreshRoom();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Delete failed: $e')),
+      );
     }
   }
 
@@ -660,10 +776,16 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
       backgroundColor: Colors.blueGrey.shade50,
       appBar: AppBar(
         backgroundColor: Colors.blueAccent,
-        title: Text(_room.name),
+        title: Text(displayRoomName(_room.name)),
         actions: [
-          IconButton(icon: const Icon(Icons.add), onPressed: _showAddDeviceDialog),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _refreshRoom),
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: _showAddDeviceDialog,
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshRoom,
+          ),
         ],
       ),
       body: AnimatedBuilder(
@@ -681,22 +803,29 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
                     decoration: BoxDecoration(
                       color: Colors.orange.withOpacity(0.18),
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.orange.withOpacity(0.40)),
+                      border: Border.all(
+                        color: Colors.orange.withOpacity(0.40),
+                      ),
                     ),
                     child: Row(
                       children: const [
-                        Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          color: Colors.orange,
+                        ),
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             'Window open → heater disabled',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
-
                 ..._room.devices.map((device) {
                   final cardColor = glowColor(device, _heaterAnimation);
 
@@ -704,13 +833,36 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
                   final isHum = isHumidity(device);
                   final isSensor = isTemp || isHum;
 
-                  final heaterAutoLocked = _heaterLocked && isHeater(device);
+                  final heaterAutoLocked =
+                      _heaterLocked && isHeater(device);
+
                   final subtitle = () {
-                    if (isTemp) return device.value == null ? '— °C' : '${device.value!.toStringAsFixed(1)} °C';
-                    if (isHum) return device.value == null ? '— %' : '${device.value!.toStringAsFixed(0)} %';
-                    if (isHeater(device)) return heaterAutoLocked ? 'Save Energy ON • Auto controlled' : 'Manual heater control';
-                    if (isWindow(device)) return device.isOn ? 'OPEN' : 'CLOSED';
-                    if (isDoorLock(device)) return device.isOn ? 'LOCKED' : 'UNLOCKED';
+                    if (isTemp) {
+                      return device.value == null
+                          ? '— °C'
+                          : '${device.value!.toStringAsFixed(1)} °C';
+                    }
+
+                    if (isHum) {
+                      return device.value == null
+                          ? '— %'
+                          : '${device.value!.toStringAsFixed(0)} %';
+                    }
+
+                    if (isHeater(device)) {
+                      return heaterAutoLocked
+                          ? 'Save Energy ON • Auto controlled'
+                          : 'Manual heater control';
+                    }
+
+                    if (isWindow(device)) {
+                      return device.isOn ? 'OPEN' : 'CLOSED';
+                    }
+
+                    if (isDoorLock(device)) {
+                      return device.isOn ? 'LOCKED' : 'UNLOCKED';
+                    }
+
                     return device.isOn ? 'ON' : 'OFF';
                   }();
 
@@ -734,7 +886,11 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
                     ),
                     child: Row(
                       children: [
-                        Icon(getDeviceIcon(device.type), size: 32, color: Colors.black87),
+                        Icon(
+                          getDeviceIcon(device.type),
+                          size: 32,
+                          color: Colors.black87,
+                        ),
                         const SizedBox(width: 20),
                         Expanded(
                           child: Column(
@@ -742,21 +898,29 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
                             children: [
                               Text(
                                 device.name,
-                                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                                style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                               const SizedBox(height: 3),
                               Text(
                                 subtitle,
-                                style: const TextStyle(fontSize: 14, color: Colors.black54, fontWeight: FontWeight.w600),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.black54,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ],
                           ),
                         ),
-
-                        // right side
                         if (isSensor)
                           IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.black45),
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: Colors.black45,
+                            ),
                             onPressed: () => _confirmDelete(device),
                             tooltip: 'Delete device',
                           )
@@ -767,7 +931,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
                               const Icon(Icons.lock, color: Colors.black54),
                               const SizedBox(width: 6),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline, color: Colors.black45),
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  color: Colors.black45,
+                                ),
                                 onPressed: () => _confirmDelete(device),
                                 tooltip: 'Delete device',
                               ),
@@ -779,10 +946,14 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> with SingleTickerPr
                             children: [
                               Switch(
                                 value: device.isOn,
-                                onChanged: (value) => _handleToggle(device, value),
+                                onChanged: (value) =>
+                                    _handleToggle(device, value),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline, color: Colors.black45),
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  color: Colors.black45,
+                                ),
                                 onPressed: () => _confirmDelete(device),
                                 tooltip: 'Delete device',
                               ),
