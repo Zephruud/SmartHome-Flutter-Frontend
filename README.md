@@ -1,4 +1,4 @@
-Smart Home – Flutter Web Application
+# Smart Home – Flutter Web Application
 
 This repository contains the Flutter/Dart frontend of the Smart Home system.
 
