@@ -1,16 +1,11 @@
-# emanagement
+Smart Home – Flutter Web Application
 
-A new Flutter project.
+This repository contains the Flutter/Dart frontend of the Smart Home system.
 
-## Getting Started
+The application allows users to monitor room conditions, view device states, and control supported Smart Home devices through a web browser.
 
-This project is a starting point for a Flutter application.
+The frontend communicates with a Java Spring Boot backend deployed on Railway through REST APIs and uses MQTT communication through the HiveMQ broker.
 
-A few resources to get you started if this is your first Flutter project:
+The web application is deployed using Firebase Hosting.
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Live application: https://smarthome-app-865f2.web.app/
